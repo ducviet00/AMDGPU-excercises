@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/opt/rocm-6.0.1/include",
+                "/opt/rocm/lib/llvm/lib/clang/17.0.0"
+            ],
+            "defines": [
+                "__HIP__=1",
+                "__HIP_PLATFORM_AMD__=1",
+                "HIP_TEMPLATE_KERNEL_LAUNCH=1"
+            ],
+            "compilerPath": "/usr/bin/hipcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "linux-clang-x64"
+        }
+    ],
+    "version": 4
+}
