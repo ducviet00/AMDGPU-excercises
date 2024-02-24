@@ -22,6 +22,29 @@
 
 #include <jpeglib.h>
 
+#include <hip/hip_runtime.h>
+#include <thrust/device_vector.h>
+
+#define BLOCKSIZE 16
+
+#define DIVUP(x, y) ((x + y - 1) / y)
+
+#define HIPCHECK(err) __checkHipErrors(err, __FILE__, __LINE__)
+
+inline void __checkHipErrors(hipError_t err, const char *file, const int line)
+{
+  if (HIP_SUCCESS != err)
+  {
+    const char *errorStr = hipGetErrorString(err);
+    fprintf(stderr,
+            "checkHipErrors() HIP API error = %04d \"%s\" from file <%s>, "
+            "line %i.\n",
+            err, errorStr, file, line);
+    exit(EXIT_FAILURE);
+  }
+}
+
+
 #ifndef M_PI
 #define M_PI 3.141592653589793
 #endif
@@ -58,10 +81,10 @@ class Vec3
 {
   public:
     T x, y, z;
-    Vec3() : x(T(0)), y(T(0)), z(T(0)) {}
-    Vec3(T xx) : x(xx), y(xx), z(xx) {}
-    Vec3(T xx, T yy, T zz) : x(xx), y(yy), z(zz) {}
-    Vec3& normalize()
+    __host__ __device__ Vec3() : x(T(0)), y(T(0)), z(T(0)) {}
+    __host__ __device__ Vec3(T xx) : x(xx), y(xx), z(xx) {}
+    __host__ __device__ Vec3(T xx, T yy, T zz) : x(xx), y(yy), z(zz) {}
+    __host__ __device__ Vec3& normalize()
     {
       T nor2 = length2();
       if (nor2 > 0) {
@@ -70,16 +93,16 @@ class Vec3
       }
       return *this;
     }
-    Vec3<T> operator * (const T &f) const { return Vec3<T>(x * f, y * f, z * f); }
-    Vec3<T> operator * (const Vec3<T> &v) const { return Vec3<T>(x * v.x, y * v.y, z * v.z); }
-    T dot(const Vec3<T> &v) const { return x * v.x + y * v.y + z * v.z; }
-    Vec3<T> operator - (const Vec3<T> &v) const { return Vec3<T>(x - v.x, y - v.y, z - v.z); }
-    Vec3<T> operator + (const Vec3<T> &v) const { return Vec3<T>(x + v.x, y + v.y, z + v.z); }
-    Vec3<T>& operator += (const Vec3<T> &v) { x += v.x, y += v.y, z += v.z; return *this; }
-    Vec3<T>& operator *= (const Vec3<T> &v) { x *= v.x, y *= v.y, z *= v.z; return *this; }
-    Vec3<T> operator - () const { return Vec3<T>(-x, -y, -z); }
-    T length2() const { return x * x + y * y + z * z; }
-    T length() const { return sqrt(length2()); }
+    __host__ __device__ Vec3<T> operator * (const T &f) const { return Vec3<T>(x * f, y * f, z * f); }
+    __host__ __device__ Vec3<T> operator * (const Vec3<T> &v) const { return Vec3<T>(x * v.x, y * v.y, z * v.z); }
+    __host__ __device__ T dot(const Vec3<T> &v) const { return x * v.x + y * v.y + z * v.z; }
+    __host__ __device__ Vec3<T> operator - (const Vec3<T> &v) const { return Vec3<T>(x - v.x, y - v.y, z - v.z); }
+    __host__ __device__ Vec3<T> operator + (const Vec3<T> &v) const { return Vec3<T>(x + v.x, y + v.y, z + v.z); }
+    __host__ __device__ Vec3<T>& operator += (const Vec3<T> &v) { x += v.x, y += v.y, z += v.z; return *this; }
+    __host__ __device__ Vec3<T>& operator *= (const Vec3<T> &v) { x *= v.x, y *= v.y, z *= v.z; return *this; }
+    __host__ __device__ Vec3<T> operator - () const { return Vec3<T>(-x, -y, -z); }
+    __host__ __device__ T length2() const { return x * x + y * y + z * z; }
+    __host__ __device__ T length() const { return sqrt(length2()); }
     friend std::ostream & operator << (std::ostream &os, const Vec3<T> &v)
     {
       os << "[" << v.x << " " << v.y << " " << v.z << "]";
@@ -96,7 +119,7 @@ class Sphere
     float radius, radius2;                  /// sphere radius and radius^2
     Vec3f surfaceColor, emissionColor;      /// surface color and emission (light)
     float transparency, reflection;         /// surface transparency and reflectivity
-    Sphere(
+    __host__ __device__ Sphere(
         const Vec3f &c,
         const float &r,
         const Vec3f &sc,
@@ -108,7 +131,7 @@ class Sphere
   { /* empty */ }
 
     // Compute a ray-sphere intersection using the geometric solution
-    bool intersect(const Vec3f &rayorig, const Vec3f &raydir, float &t0, float &t1) const
+    __host__ __device__ bool intersect(const Vec3f &rayorig, const Vec3f &raydir, float &t0, float &t1) const
     {
       Vec3f l = center - rayorig;
       float tca = l.dot(raydir);
@@ -126,7 +149,7 @@ class Sphere
 // This variable controls the maximum recursion depth
 #define MAX_RAY_DEPTH 5
 
-float mix(const float &a, const float &b, const float &mix)
+__host__ __device__ float mix(const float &a, const float &b, const float &mix)
 {
   return b * mix + a * (1 - mix);
 }
@@ -139,17 +162,18 @@ float mix(const float &a, const float &b, const float &mix)
 // The function returns a color for the ray. If the ray intersects an object that
 // is the color of the object at the intersection point, otherwise it returns
 // the background color.
-Vec3f trace(
+__host__ __device__ Vec3f trace(
     const Vec3f &rayorig,
     const Vec3f &raydir,
-    const std::vector<Sphere> &spheres,
+    const Sphere *spheres,
+    const size_t spheres_size,
     const int &depth)
 {
   //if (raydir.length() != 1) std::cerr << "Error " << raydir << std::endl;
   float tnear = INFINITY;
   const Sphere* sphere = NULL;
   // find intersection of this ray with the sphere in the scene
-  for (unsigned i = 0; i < spheres.size(); ++i) {
+  for (unsigned i = 0; i < spheres_size; ++i) {
     float t0 = INFINITY, t1 = INFINITY;
     if (spheres[i].intersect(rayorig, raydir, t0, t1)) {
       if (t0 < 0) t0 = t1;
@@ -180,7 +204,7 @@ Vec3f trace(
     // are already normalized)
     Vec3f refldir = raydir - nhit * 2 * raydir.dot(nhit);
     refldir.normalize();
-    Vec3f reflection = trace(phit + nhit * bias, refldir, spheres, depth + 1);
+    Vec3f reflection = trace(phit + nhit * bias, refldir, spheres, spheres_size, depth + 1);
     Vec3f refraction = 0;
     // if the sphere is also transparent compute refraction ray (transmission)
     if (sphere->transparency) {
@@ -189,7 +213,7 @@ Vec3f trace(
       float k = 1 - eta * eta * (1 - cosi * cosi);
       Vec3f refrdir = raydir * eta + nhit * (eta *  cosi - sqrt(k));
       refrdir.normalize();
-      refraction = trace(phit - nhit * bias, refrdir, spheres, depth + 1);
+      refraction = trace(phit - nhit * bias, refrdir, spheres, spheres_size, depth + 1);
     }
     // the result is a mix of reflection and refraction (if the sphere is transparent)
     surfaceColor = (
@@ -198,13 +222,13 @@ Vec3f trace(
   }
   else {
     // it's a diffuse object, no need to raytrace any further
-    for (unsigned i = 0; i < spheres.size(); ++i) {
+    for (unsigned i = 0; i < spheres_size; ++i) {
       if (spheres[i].emissionColor.x > 0) {
         // this is a light
         Vec3f transmission = 1;
         Vec3f lightDirection = spheres[i].center - phit;
         lightDirection.normalize();
-        for (unsigned j = 0; j < spheres.size(); ++j) {
+        for (unsigned j = 0; j < spheres_size; ++j) {
           if (i != j) {
             float t0, t1;
             if (spheres[j].intersect(phit + nhit * bias, lightDirection, t0, t1)) {
@@ -238,30 +262,58 @@ Vec3f* render_cpu(const std::vector<Sphere> &spheres, size_t width, size_t heigh
       float yy = (1 - 2 * ((y + 0.5) * invHeight)) * angle;
       Vec3f raydir(xx, yy, -1);
       raydir.normalize();
-      *pixel = trace(Vec3f(0), raydir, spheres, 0);
+      *pixel = trace(Vec3f(0), raydir, spheres.data(), spheres.size(), 0);
     }
   }
 
   return image;
 }
 
+__global__ void render_gpu_kernel(Vec3f *image, size_t width, size_t height,
+                                  Sphere *spheres, size_t spheres_size,
+                                  float invWidth, float invHeight,
+                                  float angle, float aspectratio)
+{
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (x >= width || y >= height) return;;
+
+  float xx = (2 * ((x + 0.5) * invWidth) - 1) * angle * aspectratio;
+  float yy = (1 - 2 * ((y + 0.5) * invHeight)) * angle;
+  Vec3f raydir(xx, yy, -1);
+  raydir.normalize();
+  image[y * width + x] = trace(Vec3f(0), raydir, spheres, spheres_size, 0);
+}
+
 Vec3f* render_gpu(const std::vector<Sphere> &spheres, size_t width, size_t height)
 {
   //TODO:
-  Vec3f *image = new Vec3f[width * height], *pixel = image;
+  // Vec3f *image = new Vec3f[width * height], *pixel = image;
+  size_t spheres_size = spheres.size();
+  Sphere  *spheres_d;
+  HIPCHECK(hipMalloc(&spheres_d, spheres_size * sizeof(Sphere)));
+
+  Vec3f *image, *image_d;
+  HIPCHECK(hipHostMalloc(&image, width * height * sizeof(Vec3f)));
+  HIPCHECK(hipMalloc(&image_d, width * height * sizeof(Vec3f)));
+
   float invWidth = 1 / float(width), invHeight = 1 / float(height);
   float fov = 30, aspectratio = width / float(height);
   float angle = tan(M_PI * 0.5 * fov / 180.);
   // Trace rays
-  for (unsigned y = 0; y < height; ++y) {
-    for (unsigned x = 0; x < width; ++x, ++pixel) {
-      float xx = (2 * ((x + 0.5) * invWidth) - 1) * angle * aspectratio;
-      float yy = (1 - 2 * ((y + 0.5) * invHeight)) * angle;
-      Vec3f raydir(xx, yy, -1);
-      raydir.normalize();
-      *pixel = trace(Vec3f(0), raydir, spheres, 0);
-    }
-  }
+  HIPCHECK(hipMemcpyHtoD(spheres_d, (void *)spheres.data(), spheres_size * sizeof(Sphere)));
+  HIPCHECK(hipDeviceSynchronize());
+  dim3 bs(DIVUP(width, BLOCKSIZE), DIVUP(height, BLOCKSIZE));
+  dim3 ts(BLOCKSIZE, BLOCKSIZE);
+  hipLaunchKernelGGL(render_gpu_kernel, bs, ts, 0, 0,
+                    image_d, width, height, spheres_d, spheres_size, invWidth, invHeight, angle, aspectratio);
+  HIPCHECK(hipGetLastError());
+  HIPCHECK(hipMemcpyDtoH(image, image_d, width * height * sizeof(Vec3f)));
+  HIPCHECK(hipDeviceSynchronize());
+  HIPCHECK(hipFree(image_d));
+  HIPCHECK(hipFree(spheres_d));
+  HIPCHECK(hipDeviceSynchronize());
 
   return image;
 }
@@ -316,6 +368,7 @@ int main(int argc, char **argv)
     Vec3f* image_cpu = render_cpu(spheres, width, height);
     for (unsigned i = 0; i < width * height; ++i) {
       if((image_gpu[i].x != image_cpu[i].x) || (image_gpu[i].y != image_cpu[i].y) || (image_gpu[i].z != image_cpu[i].z)) {
+        // printf("%d x: %f %f y: %f %f z: %f %f\n", i, image_gpu[i].x, image_cpu[i].x, image_gpu[i].y, image_cpu[i].y, image_gpu[i].z, image_cpu[i].z);
         pass = false;
         break;
       }
@@ -327,6 +380,7 @@ int main(int argc, char **argv)
     else {
       fprintf(stdout, "Verification Failed\n");
     }
+    save_jpeg_image("cpu.jpg", image_cpu, width, height);
     delete [] image_cpu;
   }
 
@@ -345,7 +399,7 @@ int main(int argc, char **argv)
     save_jpeg_image(filename, image_gpu, width, height);
 #endif
   }
-  delete [] image_gpu;
+  HIPCHECK(hipHostFree(image_gpu));
 
   clock_gettime(CLOCK_MONOTONIC, &end);
   timespec_subtract(&spent, &end, &start);
