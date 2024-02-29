@@ -2,6 +2,7 @@
 !/**/
 !*.*
 *.jpg
+!Makefile
 
 # Prerequisites
 *.d
