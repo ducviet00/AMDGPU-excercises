@@ -16,6 +16,9 @@ $(TARGET): $(OBJS)
 .cc.o:
 	$(CXX) $(CFLAGS) -c $< -o $@
 
+debug:
+	srun -p EM --gres=gpu:1 --pty rocgdb --args ./raytracer 512 512 0
+
 clean:
 	rm -rf $(TARGET) $(OBJS)
 
