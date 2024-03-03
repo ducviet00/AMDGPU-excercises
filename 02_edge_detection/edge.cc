@@ -14,7 +14,7 @@
 
 using namespace std;
 
-#define NSTREAM 2
+#define NSTREAM 4
 
 #define BLOCKSIZE 16
 
