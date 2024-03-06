@@ -410,7 +410,7 @@ Vec3f* render_gpu(const std::vector<Sphere> &spheres, size_t width, size_t heigh
 
   // Trace rays
   const int TOTAL_BUFFER = NGPU;
-  Vec3f *image = (Vec3f *)aligned_alloc(1024, width * height * sizeof(Vec3f));
+  Vec3f *image;
   HIPCHECK(hipHostMalloc(&image, width * height * sizeof(Vec3f), hipHostMallocNonCoherent));
 
   for (int j = 0; j < NGPU; j++)
