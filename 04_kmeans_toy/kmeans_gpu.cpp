@@ -11,9 +11,9 @@
 
 #define HIPCHECK(err) __checkHipErrors(err, __FILE__, __LINE__)
 
-inline void __checkHipErrors(hipError_t err, const char* file, const int line) {
+inline void __checkHipErrors(hipError_t err, const char *file, const int line) {
     if (HIP_SUCCESS != err) {
-        const char* errorStr = hipGetErrorString(err);
+        const char *errorStr = hipGetErrorString(err);
         fprintf(stderr,
                 "checkHipErrors() HIP API error = %04d \"%s\" from file <%s>, "
                 "line %i.\n",
@@ -22,9 +22,8 @@ inline void __checkHipErrors(hipError_t err, const char* file, const int line) {
     }
 }
 
-
 __device__ __forceinline__ double warpReduceSum(double val) {
-    #pragma unroll
+#pragma unroll
     for (int offset = WARP_SIZE / 2; offset > 0; offset >>= 1)
         val += __shfl_xor(val, offset);
     return val;
@@ -51,25 +50,15 @@ __device__ __forceinline__ double blockReduceSum(double val) {
     return val;
 }
 
-
-__global__ void assignment_kernel(int data_n, int class_n, Point* centroids, Point* data, int* partitioned) {
+__global__ void assignment_kernel(int data_n, int class_n, Point *centroids, Point *data, int *partitioned) {
     const uint data_i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    // extern __shared__ Point shm_centroids[];
-
     const Point p = data[data_i];
-
-    // Load centroids to shared memory
-    // for (uint i = threadIdx.x; i < class_n; i += blockDim.x) {
-    //     shm_centroids[i].x = centroids[i].x;
-    //     shm_centroids[i].y = centroids[i].y;
-    // }
-    // __syncthreads();
 
     if (data_i < data_n) {
         double min_dist = DBL_MAX;
 
-        #pragma unroll
+#pragma unroll
         for (uint class_i = 0; class_i < class_n; class_i++) {
             double x = p.x - centroids[class_i].x;
             double y = p.y - centroids[class_i].y;
@@ -84,13 +73,13 @@ __global__ void assignment_kernel(int data_n, int class_n, Point* centroids, Poi
     }
 }
 
-__global__ void update_kernel(int data_n, int class_n, Point* centroids, Point* data, int* partitioned) {
+__global__ void update_kernel(int data_n, int class_n, Point *centroids, Point *data, int *partitioned) {
     int class_i = blockIdx.x;
 
     double sum_x = 0, sum_y = 0;
     int count = 0;
 
-    for (int data_i = threadIdx.x; data_i < data_n; data_i+=blockDim.x) {
+    for (int data_i = threadIdx.x; data_i < data_n; data_i += blockDim.x) {
         if (partitioned[data_i] == class_i) {
             sum_x += data[data_i].x;
             sum_y += data[data_i].y;
@@ -105,11 +94,10 @@ __global__ void update_kernel(int data_n, int class_n, Point* centroids, Point* 
     if (threadIdx.x == 0) {
         centroids[class_i].x = sum_x / count;
         centroids[class_i].y = sum_y / count;
-
     }
 }
 
-void kmeans(int iteration_n, int class_n, int data_n, Point* centroids, Point* data, int* partitioned) {
+void kmeans(int iteration_n, int class_n, int data_n, Point *centroids, Point *data, int *partitioned) {
     // Loop indices for iteration, data and class
     int i;
 
@@ -128,7 +116,6 @@ void kmeans(int iteration_n, int class_n, int data_n, Point* centroids, Point* d
     // Iterate through number of interations
     for (i = 0; i < iteration_n; i++) {
         // Assignment step
-        // uint32_t shared_mem_size = class_n * sizeof(Point);
         hipLaunchKernelGGL(assignment_kernel, dim3(DIVUP(data_n, BLOCKSIZE)), dim3(BLOCKSIZE), 0, 0,
                            data_n, class_n, d_centroids, d_data, d_partitioned);
         HIPCHECK(hipGetLastError());
